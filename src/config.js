@@ -19,14 +19,18 @@ export const CONFIG = {
 
   // Algorithm parameters
   ALGORITHM: {
-    OPTIMIZATION_RUNS: 5,            // Base number of random starting configurations
-    ANNEALING_ITERATIONS: 500,       // Base steps per simulated annealing run
+    OPTIMIZATION_RUNS: 8,            // Base number of random starting configurations
+    ANNEALING_ITERATIONS: 1000,      // Base steps per simulated annealing run
     INITIAL_TEMPERATURE: 100,        // Starting temperature for annealing
-    COOLING_RATE: 0.995,             // Temperature decay rate per iteration
+    COOLING_RATE: 0.997,             // Temperature decay rate per iteration (slower cooling)
     // Scaling: increase iterations for larger groups
-    SCALE_THRESHOLD: 20,             // Start scaling above this many students
-    MAX_RUNS: 15,                    // Maximum optimization runs
-    MAX_ITERATIONS: 2000,            // Maximum annealing iterations
+    SCALE_THRESHOLD: 15,             // Start scaling above this many students
+    MAX_RUNS: 20,                    // Maximum optimization runs
+    MAX_ITERATIONS: 5000,            // Maximum annealing iterations
+    // Operation probabilities during optimization
+    SWAP_PROBABILITY: 0.5,           // Probability of 2-way swap
+    CYCLE_PROBABILITY: 0.3,          // Probability of 3-way cycle swap
+    MOVE_PROBABILITY: 0.2,           // Probability of single student move
   },
 
   // UI defaults

@@ -152,12 +152,35 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
 
   const cloneAssignment = (assignment) => assignment.map(h => ({ ...h, students: [...h.students] }));
 
+  // 2-way swap: exchange two students between houses
   const swapStudents = (assignment, house1Idx, student1Idx, house2Idx, student2Idx) => {
     const newAssignment = cloneAssignment(assignment);
     const student1 = newAssignment[house1Idx].students[student1Idx];
     const student2 = newAssignment[house2Idx].students[student2Idx];
     newAssignment[house1Idx].students[student1Idx] = student2;
     newAssignment[house2Idx].students[student2Idx] = student1;
+    return newAssignment;
+  };
+
+  // 3-way cycle swap: A→B, B→C, C→A (rotate students through 3 houses)
+  const cycleSwapStudents = (assignment, h1Idx, s1Idx, h2Idx, s2Idx, h3Idx, s3Idx) => {
+    const newAssignment = cloneAssignment(assignment);
+    const student1 = newAssignment[h1Idx].students[s1Idx];
+    const student2 = newAssignment[h2Idx].students[s2Idx];
+    const student3 = newAssignment[h3Idx].students[s3Idx];
+    // Rotate: 1→2's spot, 2→3's spot, 3→1's spot
+    newAssignment[h2Idx].students[s2Idx] = student1;
+    newAssignment[h3Idx].students[s3Idx] = student2;
+    newAssignment[h1Idx].students[s1Idx] = student3;
+    return newAssignment;
+  };
+
+  // Move single student to a different house (if capacity allows)
+  const moveStudent = (assignment, fromHouseIdx, studentIdx, toHouseIdx) => {
+    const newAssignment = cloneAssignment(assignment);
+    const student = newAssignment[fromHouseIdx].students[studentIdx];
+    newAssignment[fromHouseIdx].students.splice(studentIdx, 1);
+    newAssignment[toHouseIdx].students.push(student);
     return newAssignment;
   };
 
@@ -170,13 +193,53 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
     const coolingRate = CONFIG.ALGORITHM.COOLING_RATE;
 
     for (let i = 0; i < iterations; i++) {
-      const house1Idx = Math.floor(Math.random() * currentAssignment.length);
-      const house2Idx = Math.floor(Math.random() * currentAssignment.length);
-      if (house1Idx === house2Idx || currentAssignment[house1Idx].students.length === 0 || currentAssignment[house2Idx].students.length === 0) continue;
+      let newAssignment = null;
+      const rand = Math.random();
 
-      const student1Idx = Math.floor(Math.random() * currentAssignment[house1Idx].students.length);
-      const student2Idx = Math.floor(Math.random() * currentAssignment[house2Idx].students.length);
-      const newAssignment = swapStudents(currentAssignment, house1Idx, student1Idx, house2Idx, student2Idx);
+      if (rand < CONFIG.ALGORITHM.SWAP_PROBABILITY) {
+        // Standard 2-way swap
+        const house1Idx = Math.floor(Math.random() * currentAssignment.length);
+        const house2Idx = Math.floor(Math.random() * currentAssignment.length);
+        if (house1Idx === house2Idx || currentAssignment[house1Idx].students.length === 0 || currentAssignment[house2Idx].students.length === 0) continue;
+
+        const student1Idx = Math.floor(Math.random() * currentAssignment[house1Idx].students.length);
+        const student2Idx = Math.floor(Math.random() * currentAssignment[house2Idx].students.length);
+        newAssignment = swapStudents(currentAssignment, house1Idx, student1Idx, house2Idx, student2Idx);
+
+      } else if (rand < CONFIG.ALGORITHM.SWAP_PROBABILITY + CONFIG.ALGORITHM.CYCLE_PROBABILITY) {
+        // 3-way cycle swap
+        if (currentAssignment.length < 3) continue;
+        const houseIndices = [];
+        while (houseIndices.length < 3) {
+          const idx = Math.floor(Math.random() * currentAssignment.length);
+          if (!houseIndices.includes(idx) && currentAssignment[idx].students.length > 0) {
+            houseIndices.push(idx);
+          }
+        }
+        const [h1, h2, h3] = houseIndices;
+        const s1 = Math.floor(Math.random() * currentAssignment[h1].students.length);
+        const s2 = Math.floor(Math.random() * currentAssignment[h2].students.length);
+        const s3 = Math.floor(Math.random() * currentAssignment[h3].students.length);
+        newAssignment = cycleSwapStudents(currentAssignment, h1, s1, h2, s2, h3, s3);
+
+      } else {
+        // Single student move
+        const fromHouseIdx = Math.floor(Math.random() * currentAssignment.length);
+        if (currentAssignment[fromHouseIdx].students.length <= 1) continue; // Keep at least 1 student
+
+        // Find houses with available capacity
+        const availableHouses = currentAssignment
+          .map((h, idx) => ({ idx, hasCapacity: h.students.length < h.capacity }))
+          .filter(h => h.hasCapacity && h.idx !== fromHouseIdx);
+        if (availableHouses.length === 0) continue;
+
+        const toHouseIdx = availableHouses[Math.floor(Math.random() * availableHouses.length)].idx;
+        const studentIdx = Math.floor(Math.random() * currentAssignment[fromHouseIdx].students.length);
+        newAssignment = moveStudent(currentAssignment, fromHouseIdx, studentIdx, toHouseIdx);
+      }
+
+      if (!newAssignment) continue;
+
       const newScore = calculateHappiness(newAssignment).score;
       const delta = newScore - currentScore;
       const acceptProbability = delta > 0 ? 1 : Math.exp(delta / temperature);
@@ -207,21 +270,45 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
     const assignedStudents = new Set();
     const mutualPairs = findMutualFirstPreferences();
 
+    // Place mutual first-choice pairs, preferring their house preferences
     for (const [studentAId, studentBId] of mutualPairs) {
       if (assignedStudents.has(studentAId) || assignedStudents.has(studentBId)) continue;
+      const studentA = students.find(s => s.id === studentAId);
+      const studentB = students.find(s => s.id === studentBId);
+
+      // Find best house considering both students' house preferences
+      let bestHouse = null;
+      let bestHouseScore = -1;
       for (const house of assignment) {
         if (house.students.length + 2 <= house.capacity) {
-          house.students.push(studentAId, studentBId);
-          assignedStudents.add(studentAId);
-          assignedStudents.add(studentBId);
-          break;
+          let houseScore = 0;
+          const aPrefs = studentA?.housePreferences || [];
+          const bPrefs = studentB?.housePreferences || [];
+          if (aPrefs[0] === house.id) houseScore += 2;
+          else if (aPrefs[1] === house.id) houseScore += 1;
+          if (bPrefs[0] === house.id) houseScore += 2;
+          else if (bPrefs[1] === house.id) houseScore += 1;
+
+          if (houseScore > bestHouseScore || (houseScore === bestHouseScore && !bestHouse)) {
+            bestHouseScore = houseScore;
+            bestHouse = house;
+          }
         }
+      }
+
+      if (bestHouse) {
+        bestHouse.students.push(studentAId, studentBId);
+        assignedStudents.add(studentAId);
+        assignedStudents.add(studentBId);
       }
     }
 
+    // Place remaining students considering roommate AND house preferences
     for (const student of shuffledStudents) {
       if (assignedStudents.has(student.id)) continue;
       let bestHouse = null, bestScore = -Infinity;
+      const housePrefs = student.housePreferences || [];
+
       for (const house of assignment) {
         if (house.students.length >= house.capacity) continue;
         const hasConflict = house.students.some(sid => {
@@ -229,11 +316,17 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
           return student.avoids.includes(sid) || s?.avoids.includes(student.id);
         });
         if (hasConflict) continue;
+
         let score = 0;
+        // Roommate preference score
         for (const existingStudentId of house.students) {
           const prefIdx = student.preferences.indexOf(existingStudentId);
           if (prefIdx !== -1) score += 10 - prefIdx;
         }
+        // House preference score
+        if (housePrefs[0] === house.id) score += 15;  // Strong bonus for 1st choice house
+        else if (housePrefs[1] === house.id) score += 8;  // Moderate bonus for 2nd choice
+
         if (score > bestScore || (score === bestScore && Math.random() > 0.5)) {
           bestScore = score;
           bestHouse = house;
