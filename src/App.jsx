@@ -84,7 +84,8 @@ function App() {
       firstName: '',
       lastName: '',
       preferences: [],
-      avoids: []
+      avoids: [],
+      housePreferences: []  // [firstChoiceId, secondChoiceId]
     }]);
   }, [setStudents]);
 
@@ -142,6 +143,7 @@ function App() {
           {activeTab === 'preferences' && (
             <PreferenceManager
               students={students}
+              houses={houses}
               selectedStudentId={selectedStudentId}
               onSelectStudent={setSelectedStudentId}
               onUpdateStudents={setStudents}

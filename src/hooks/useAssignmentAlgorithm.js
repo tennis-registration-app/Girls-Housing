@@ -25,11 +25,22 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
 
   const calculateHappiness = useCallback((assignment) => {
     let totalScore = 0, conflicts = 0, mutualFirstMatches = 0, mutualPreferences = 0, preferencesMet = 0;
+    let houseFirstChoices = 0, houseSecondChoices = 0;
 
     for (const house of assignment) {
       for (let i = 0; i < house.students.length; i++) {
         const student = students.find(s => s.id === house.students[i]);
         if (!student) continue;
+
+        // Check house preferences
+        const housePrefs = student.housePreferences || [];
+        if (housePrefs[0] === house.id) {
+          totalScore += CONFIG.SCORING.HOUSE_FIRST_CHOICE_SCORE;
+          houseFirstChoices++;
+        } else if (housePrefs[1] === house.id) {
+          totalScore += CONFIG.SCORING.HOUSE_SECOND_CHOICE_SCORE;
+          houseSecondChoices++;
+        }
 
         for (let j = 0; j < house.students.length; j++) {
           if (i === j) continue;
@@ -64,7 +75,7 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
         }
       }
     }
-    return { score: totalScore, conflicts, mutualFirstMatches, mutualPreferences, preferencesMet, avgScore: totalScore / students.length };
+    return { score: totalScore, conflicts, mutualFirstMatches, mutualPreferences, preferencesMet, houseFirstChoices, houseSecondChoices, avgScore: totalScore / students.length };
   }, [students]);
 
   const analyzeStudentResults = useCallback((assignment) => {
@@ -75,6 +86,19 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
         if (!student) continue;
         const roommates = house.students.filter(id => id !== studentId);
         let individualScore = 0, preferencesMatched = [], avoidsViolated = [], avoidedBy = [], mutualMatches = [], topChoiceRank = null;
+
+        // Check house preference result
+        const housePrefs = student.housePreferences || [];
+        let housePreferenceResult = null;
+        if (housePrefs[0] === house.id) {
+          housePreferenceResult = '1st';
+          individualScore += CONFIG.SCORING.HOUSE_FIRST_CHOICE_SCORE;
+        } else if (housePrefs[1] === house.id) {
+          housePreferenceResult = '2nd';
+          individualScore += CONFIG.SCORING.HOUSE_SECOND_CHOICE_SCORE;
+        } else if (housePrefs.length > 0 && (housePrefs[0] || housePrefs[1])) {
+          housePreferenceResult = 'none';
+        }
 
         for (const roommateId of roommates) {
           const prefIndex = student.preferences.indexOf(roommateId);
@@ -115,10 +139,11 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
         }
 
         results.push({
-          studentId, studentName: getStudentName(studentId), houseName: house.name,
+          studentId, studentName: getStudentName(studentId), houseName: house.name, houseId: house.id,
           individualScore: Math.round(individualScore), preferencesMatched, avoidsViolated, avoidedBy,
           mutualMatches, topChoiceRank, satisfactionLevel, satisfactionColor,
-          totalPreferences: student.preferences.length, totalAvoids: student.avoids.length
+          totalPreferences: student.preferences.length, totalAvoids: student.avoids.length,
+          housePreferenceResult, housePreferences: housePrefs
         });
       }
     }
@@ -259,6 +284,7 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
         totalScore: bestStats.score, conflicts: bestStats.conflicts,
         mutualFirstMatches: bestStats.mutualFirstMatches, mutualPreferences: bestStats.mutualPreferences,
         preferencesMet: bestStats.preferencesMet, avgScore: bestStats.avgScore,
+        houseFirstChoices: bestStats.houseFirstChoices, houseSecondChoices: bestStats.houseSecondChoices,
         validArrangements: numRuns, iterationsPerRun: iterations, individualResults
       });
       setIsGenerating(false);

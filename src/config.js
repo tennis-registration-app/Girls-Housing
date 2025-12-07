@@ -13,6 +13,8 @@ export const CONFIG = {
     MUTUAL_FIRST_MULTIPLIER: 3,      // Bonus multiplier for mutual first choices
     MUTUAL_ANY_MULTIPLIER: 1.5,      // Bonus multiplier for any mutual preference
     AVOID_CONFLICT_PENALTY: 1000,    // Penalty for placing avoided students together
+    HOUSE_FIRST_CHOICE_SCORE: 50,    // Points for getting first choice house
+    HOUSE_SECOND_CHOICE_SCORE: 25,   // Points for getting second choice house
   },
 
   // Algorithm parameters

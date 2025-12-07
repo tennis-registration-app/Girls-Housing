@@ -61,11 +61,11 @@ export function ResultsView({
               <div className={stats.conflicts > 0 ? "font-medium text-red-700" : "font-medium text-green-700"}>
                 {stats.conflicts > 0 ? `${stats.conflicts} Conflicts ⚠️` : '✓ No Conflicts'}
               </div>
-              <div className="text-sm text-gray-600 mt-1">
-                Best of {stats.validArrangements} runs × {stats.iterationsPerRun || CONFIG.ALGORITHM.ANNEALING_ITERATIONS} iterations
+              <div className="text-sm text-blue-600 mt-1">
+                🏠 {stats.houseFirstChoices || 0} got 1st choice house, {stats.houseSecondChoices || 0} got 2nd
               </div>
               <div className="text-xs text-gray-500 mt-1">
-                Simulated Annealing{students.length > CONFIG.ALGORITHM.SCALE_THRESHOLD ? ' (scaled)' : ''}
+                Best of {stats.validArrangements} runs × {stats.iterationsPerRun || CONFIG.ALGORITHM.ANNEALING_ITERATIONS} iterations
               </div>
             </div>
           </div>
@@ -132,6 +132,8 @@ function HouseAssignmentCard({ house, stats, getStudentName }) {
                    result.mutualMatches?.length > 0 ? '💜 Mutual match' :
                    result.topChoiceRank ? `🎯 #${result.topChoiceRank} choice met` :
                    result.preferencesMatched?.length > 0 ? '✓ Some preferences' : '○ No preferences met'}
+                  {result.housePreferenceResult === '1st' && <span className="ml-2 text-green-600">🏠 1st choice</span>}
+                  {result.housePreferenceResult === '2nd' && <span className="ml-2 text-blue-600">🏠 2nd choice</span>}
                 </div>
               )}
             </div>
@@ -151,11 +153,12 @@ function IndividualResultsTable({ results }) {
       <h3 className="text-lg font-semibold mb-4">👤 Individual Student Results</h3>
       <div className="bg-white border rounded-lg overflow-hidden">
         <div className="grid grid-cols-12 gap-2 p-3 bg-gray-50 border-b font-medium text-sm">
-          <div className="col-span-3">Student</div>
+          <div className="col-span-2">Student</div>
           <div className="col-span-2">House</div>
+          <div className="col-span-1 text-center">House Pref</div>
           <div className="col-span-2">Satisfaction</div>
           <div className="col-span-1 text-center">Score</div>
-          <div className="col-span-2">Preferences Met</div>
+          <div className="col-span-2">Roommate Prefs</div>
           <div className="col-span-2">Issues</div>
         </div>
         {results.map(result => (
@@ -165,8 +168,14 @@ function IndividualResultsTable({ results }) {
               result.avoidsViolated.length > 0 ? 'bg-red-50' : ''
             }`}
           >
-            <div className="col-span-3 font-medium">{result.studentName}</div>
+            <div className="col-span-2 font-medium">{result.studentName}</div>
             <div className="col-span-2">{result.houseName}</div>
+            <div className="col-span-1 text-center text-xs">
+              {result.housePreferenceResult === '1st' && <span className="text-green-600 font-medium">✓ 1st</span>}
+              {result.housePreferenceResult === '2nd' && <span className="text-blue-600 font-medium">✓ 2nd</span>}
+              {result.housePreferenceResult === 'none' && <span className="text-gray-400">✗</span>}
+              {!result.housePreferenceResult && <span className="text-gray-300">-</span>}
+            </div>
             <div className={`col-span-2 ${result.satisfactionColor}`}>{result.satisfactionLevel}</div>
             <div className="col-span-1 text-center font-mono">{result.individualScore}</div>
             <div className="col-span-2 text-xs">

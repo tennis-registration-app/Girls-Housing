@@ -3,6 +3,7 @@ import { CONFIG } from '../config';
 
 export function PreferenceManager({
   students,
+  houses,
   selectedStudentId,
   onSelectStudent,
   onUpdateStudents,
@@ -56,6 +57,32 @@ export function PreferenceManager({
       }
       return s;
     }));
+  };
+
+  const setHousePreference = (rank, houseId) => {
+    if (!selectedStudentId) return;
+    onUpdateStudents(prev => prev.map(s => {
+      if (s.id === selectedStudentId) {
+        const newHousePrefs = [...(s.housePreferences || [])];
+        // Ensure array has 2 slots
+        while (newHousePrefs.length < 2) newHousePrefs.push(null);
+
+        // If this house is already selected in the other slot, swap them
+        const otherRank = rank === 0 ? 1 : 0;
+        if (newHousePrefs[otherRank] === houseId) {
+          newHousePrefs[otherRank] = newHousePrefs[rank];
+        }
+
+        newHousePrefs[rank] = houseId || null;
+        return { ...s, housePreferences: newHousePrefs };
+      }
+      return s;
+    }));
+  };
+
+  const getHouseName = (houseId) => {
+    const house = houses.find(h => h.id === houseId);
+    return house ? house.name : 'Unknown';
   };
 
   // Drag handlers
@@ -263,6 +290,44 @@ export function PreferenceManager({
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* House Preferences */}
+              <div className="mt-6 pt-6 border-t">
+                <h4 className="font-medium mb-3">House Preferences</h4>
+                <p className="text-sm text-gray-600 mb-4">Select preferred houses (optional)</p>
+                {houses.length === 0 ? (
+                  <p className="text-gray-500 italic text-sm p-3 bg-gray-50 rounded">No houses available. Add houses first.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-blue-700 mb-2">1st Choice House</label>
+                      <select
+                        value={selectedStudent?.housePreferences?.[0] || ''}
+                        onChange={(e) => setHousePreference(0, e.target.value ? Number(e.target.value) : null)}
+                        className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">-- No preference --</option>
+                        {houses.map(house => (
+                          <option key={house.id} value={house.id}>{house.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-blue-600 mb-2">2nd Choice House</label>
+                      <select
+                        value={selectedStudent?.housePreferences?.[1] || ''}
+                        onChange={(e) => setHousePreference(1, e.target.value ? Number(e.target.value) : null)}
+                        className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">-- No preference --</option>
+                        {houses.map(house => (
+                          <option key={house.id} value={house.id}>{house.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="mt-6 text-center">
