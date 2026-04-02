@@ -1,10 +1,30 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { CONFIG } from '../config';
 
+// Simple seeded random number generator (LCG)
+function seededRandom(seed) {
+  let s = seed || 1;
+  return () => {
+    s = (s * 1664525 + 1013904223) & 0xFFFFFFFF;
+    return (s >>> 0) / 0xFFFFFFFF;
+  };
+}
+
 export function useAssignmentAlgorithm(students, houses, getStudentName) {
-  const [assignments, setAssignments] = useState([]);
-  const [stats, setStats] = useState(null);
+  const [solutions, setSolutions] = useState([]);
+  const [selectedSolutionIndex, setSelectedSolutionIndex] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
+
+  // Convenience getters for selected solution (backward compatible)
+  const assignments = useMemo(
+    () => solutions[selectedSolutionIndex]?.assignments || [],
+    [solutions, selectedSolutionIndex]
+  );
+  const stats = useMemo(
+    () => solutions[selectedSolutionIndex]?.stats || null,
+    [solutions, selectedSolutionIndex]
+  );
 
   const findMutualFirstPreferences = useCallback(() => {
     const mutualPairs = [];
@@ -32,7 +52,6 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
         const student = students.find(s => s.id === house.students[i]);
         if (!student) continue;
 
-        // Check house preferences
         const housePrefs = student.housePreferences || [];
         if (housePrefs[0] === house.id) {
           totalScore += CONFIG.SCORING.HOUSE_FIRST_CHOICE_SCORE;
@@ -87,7 +106,6 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
         const roommates = house.students.filter(id => id !== studentId);
         let individualScore = 0, preferencesMatched = [], avoidsViolated = [], avoidedBy = [], mutualMatches = [], topChoiceRank = null;
 
-        // Check house preference result
         const housePrefs = student.housePreferences || [];
         let housePreferenceResult = null;
         if (housePrefs[0] === house.id) {
@@ -152,7 +170,6 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
 
   const cloneAssignment = (assignment) => assignment.map(h => ({ ...h, students: [...h.students] }));
 
-  // 2-way swap: exchange two students between houses
   const swapStudents = (assignment, house1Idx, student1Idx, house2Idx, student2Idx) => {
     const newAssignment = cloneAssignment(assignment);
     const student1 = newAssignment[house1Idx].students[student1Idx];
@@ -162,20 +179,17 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
     return newAssignment;
   };
 
-  // 3-way cycle swap: A→B, B→C, C→A (rotate students through 3 houses)
   const cycleSwapStudents = (assignment, h1Idx, s1Idx, h2Idx, s2Idx, h3Idx, s3Idx) => {
     const newAssignment = cloneAssignment(assignment);
     const student1 = newAssignment[h1Idx].students[s1Idx];
     const student2 = newAssignment[h2Idx].students[s2Idx];
     const student3 = newAssignment[h3Idx].students[s3Idx];
-    // Rotate: 1→2's spot, 2→3's spot, 3→1's spot
     newAssignment[h2Idx].students[s2Idx] = student1;
     newAssignment[h3Idx].students[s3Idx] = student2;
     newAssignment[h1Idx].students[s1Idx] = student3;
     return newAssignment;
   };
 
-  // Move single student to a different house (if capacity allows)
   const moveStudent = (assignment, fromHouseIdx, studentIdx, toHouseIdx) => {
     const newAssignment = cloneAssignment(assignment);
     const student = newAssignment[fromHouseIdx].students[studentIdx];
@@ -184,6 +198,40 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
     return newAssignment;
   };
 
+  // Preference-aware swap: pick a dissatisfied student, try to move them toward preferred roommates
+  const smartSwap = useCallback((assignment) => {
+    const flatStudents = assignment.flatMap((h, hIdx) =>
+      h.students.map((sId, sIdx) => ({ houseIdx: hIdx, studentIdx: sIdx, studentId: sId }))
+    );
+    if (flatStudents.length === 0) return null;
+
+    const picked = flatStudents[Math.floor(Math.random() * flatStudents.length)];
+    const student = students.find(s => s.id === picked.studentId);
+    if (!student || student.preferences.length === 0) return null;
+
+    // Target one of their top-3 preferred students
+    const targetPrefId = student.preferences[Math.floor(Math.random() * Math.min(3, student.preferences.length))];
+    let targetHouseIdx = -1;
+    for (let h = 0; h < assignment.length; h++) {
+      if (assignment[h].students.includes(targetPrefId)) {
+        targetHouseIdx = h;
+        break;
+      }
+    }
+
+    if (targetHouseIdx === -1 || targetHouseIdx === picked.houseIdx) return null;
+
+    // Find someone in the target house to swap with (not the preferred student)
+    const otherStudents = assignment[targetHouseIdx].students
+      .map((sId, idx) => ({ sId, idx }))
+      .filter(s => s.sId !== targetPrefId);
+
+    if (otherStudents.length === 0) return null;
+    const swapTarget = otherStudents[Math.floor(Math.random() * otherStudents.length)];
+
+    return swapStudents(assignment, picked.houseIdx, picked.studentIdx, targetHouseIdx, swapTarget.idx);
+  }, [students]);
+
   const optimizeAssignment = useCallback((initialAssignment, iterations) => {
     let currentAssignment = cloneAssignment(initialAssignment);
     let currentScore = calculateHappiness(currentAssignment).score;
@@ -191,8 +239,14 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
     let bestScore = currentScore;
     let temperature = CONFIG.ALGORITHM.INITIAL_TEMPERATURE;
     const coolingRate = CONFIG.ALGORITHM.COOLING_RATE;
+    let bestTemperature = temperature;
 
     for (let i = 0; i < iterations; i++) {
+      // Periodic reheat to escape local optima
+      if (i > 0 && i % CONFIG.ALGORITHM.REHEAT_INTERVAL === 0) {
+        temperature = Math.max(temperature, bestTemperature * CONFIG.ALGORITHM.REHEAT_FACTOR);
+      }
+
       let newAssignment = null;
       const rand = Math.random();
 
@@ -201,7 +255,6 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
         const house1Idx = Math.floor(Math.random() * currentAssignment.length);
         const house2Idx = Math.floor(Math.random() * currentAssignment.length);
         if (house1Idx === house2Idx || currentAssignment[house1Idx].students.length === 0 || currentAssignment[house2Idx].students.length === 0) continue;
-
         const student1Idx = Math.floor(Math.random() * currentAssignment[house1Idx].students.length);
         const student2Idx = Math.floor(Math.random() * currentAssignment[house2Idx].students.length);
         newAssignment = swapStudents(currentAssignment, house1Idx, student1Idx, house2Idx, student2Idx);
@@ -210,29 +263,33 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
         // 3-way cycle swap
         if (currentAssignment.length < 3) continue;
         const houseIndices = [];
-        while (houseIndices.length < 3) {
+        let attempts = 0;
+        while (houseIndices.length < 3 && attempts < 20) {
           const idx = Math.floor(Math.random() * currentAssignment.length);
           if (!houseIndices.includes(idx) && currentAssignment[idx].students.length > 0) {
             houseIndices.push(idx);
           }
+          attempts++;
         }
+        if (houseIndices.length < 3) continue;
         const [h1, h2, h3] = houseIndices;
         const s1 = Math.floor(Math.random() * currentAssignment[h1].students.length);
         const s2 = Math.floor(Math.random() * currentAssignment[h2].students.length);
         const s3 = Math.floor(Math.random() * currentAssignment[h3].students.length);
         newAssignment = cycleSwapStudents(currentAssignment, h1, s1, h2, s2, h3, s3);
 
+      } else if (rand < CONFIG.ALGORITHM.SWAP_PROBABILITY + CONFIG.ALGORITHM.CYCLE_PROBABILITY + CONFIG.ALGORITHM.SMART_SWAP_PROBABILITY) {
+        // Preference-aware swap
+        newAssignment = smartSwap(currentAssignment);
+
       } else {
         // Single student move
         const fromHouseIdx = Math.floor(Math.random() * currentAssignment.length);
-        if (currentAssignment[fromHouseIdx].students.length <= 1) continue; // Keep at least 1 student
-
-        // Find houses with available capacity
+        if (currentAssignment[fromHouseIdx].students.length <= 1) continue;
         const availableHouses = currentAssignment
           .map((h, idx) => ({ idx, hasCapacity: h.students.length < h.capacity }))
           .filter(h => h.hasCapacity && h.idx !== fromHouseIdx);
         if (availableHouses.length === 0) continue;
-
         const toHouseIdx = availableHouses[Math.floor(Math.random() * availableHouses.length)].idx;
         const studentIdx = Math.floor(Math.random() * currentAssignment[fromHouseIdx].students.length);
         newAssignment = moveStudent(currentAssignment, fromHouseIdx, studentIdx, toHouseIdx);
@@ -250,18 +307,51 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
         if (newScore > bestScore) {
           bestAssignment = cloneAssignment(newAssignment);
           bestScore = newScore;
+          bestTemperature = temperature;
         }
       }
       temperature *= coolingRate;
     }
     return bestAssignment;
+  }, [calculateHappiness, smartSwap]);
+
+  // Greedy hill-climbing polish: try all pairwise swaps, accept only improvements
+  const greedyPolish = useCallback((assignment) => {
+    let improved = true;
+    let current = cloneAssignment(assignment);
+    let currentScore = calculateHappiness(current).score;
+
+    while (improved) {
+      improved = false;
+      const flatStudents = current.flatMap((h, hIdx) =>
+        h.students.map((sId, sIdx) => ({ houseIdx: hIdx, studentIdx: sIdx }))
+      );
+
+      for (let i = 0; i < flatStudents.length && !improved; i++) {
+        for (let j = i + 1; j < flatStudents.length && !improved; j++) {
+          const a = flatStudents[i], b = flatStudents[j];
+          if (a.houseIdx === b.houseIdx) continue;
+
+          const candidate = swapStudents(current, a.houseIdx, a.studentIdx, b.houseIdx, b.studentIdx);
+          const candidateScore = calculateHappiness(candidate).score;
+          if (candidateScore > currentScore) {
+            current = candidate;
+            currentScore = candidateScore;
+            improved = true;
+          }
+        }
+      }
+    }
+    return current;
   }, [calculateHappiness]);
 
   const generateInitialAssignment = useCallback((shuffleSeed = 0) => {
     const shuffledStudents = [...students];
     if (shuffleSeed > 0) {
+      // Proper seeded Fisher-Yates shuffle
+      const rng = seededRandom(shuffleSeed);
       for (let i = shuffledStudents.length - 1; i > 0; i--) {
-        const j = Math.floor(((i + 1) * shuffleSeed) % (i + 1));
+        const j = Math.floor(rng() * (i + 1));
         [shuffledStudents[i], shuffledStudents[j]] = [shuffledStudents[j], shuffledStudents[i]];
       }
     }
@@ -276,7 +366,6 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
       const studentA = students.find(s => s.id === studentAId);
       const studentB = students.find(s => s.id === studentBId);
 
-      // Find best house considering both students' house preferences
       let bestHouse = null;
       let bestHouseScore = -1;
       for (const house of assignment) {
@@ -318,14 +407,12 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
         if (hasConflict) continue;
 
         let score = 0;
-        // Roommate preference score
         for (const existingStudentId of house.students) {
           const prefIdx = student.preferences.indexOf(existingStudentId);
           if (prefIdx !== -1) score += 10 - prefIdx;
         }
-        // House preference score
-        if (housePrefs[0] === house.id) score += 15;  // Strong bonus for 1st choice house
-        else if (housePrefs[1] === house.id) score += 8;  // Moderate bonus for 2nd choice
+        if (housePrefs[0] === house.id) score += 15;
+        else if (housePrefs[1] === house.id) score += 8;
 
         if (score > bestScore || (score === bestScore && Math.random() > 0.5)) {
           bestScore = score;
@@ -341,6 +428,20 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
     return assignment;
   }, [students, houses, findMutualFirstPreferences]);
 
+  // Check if two solutions are >90% similar (same student-to-house mapping)
+  const areSolutionsSimilar = (a, b) => {
+    const mapA = {}, mapB = {};
+    a.forEach(h => h.students.forEach(s => mapA[s] = h.id));
+    b.forEach(h => h.students.forEach(s => mapB[s] = h.id));
+
+    let sameCount = 0, total = 0;
+    for (const sId in mapA) {
+      total++;
+      if (mapA[sId] === mapB[sId]) sameCount++;
+    }
+    return total > 0 && (sameCount / total) > 0.9;
+  };
+
   const runAssignment = useCallback(() => {
     if (students.length === 0 || houses.length === 0) return;
 
@@ -351,49 +452,119 @@ export function useAssignmentAlgorithm(students, houses, getStudentName) {
     }
 
     setIsGenerating(true);
-    setStats(null);
+    setSolutions([]);
+    setSelectedSolutionIndex(0);
 
-    setTimeout(() => {
-      const studentCount = students.length;
-      const scaleFactor = studentCount > CONFIG.ALGORITHM.SCALE_THRESHOLD
-        ? Math.min(studentCount / CONFIG.ALGORITHM.SCALE_THRESHOLD, 3) : 1;
-      const numRuns = Math.min(Math.ceil(CONFIG.ALGORITHM.OPTIMIZATION_RUNS * scaleFactor), CONFIG.ALGORITHM.MAX_RUNS);
-      const iterations = Math.min(Math.ceil(CONFIG.ALGORITHM.ANNEALING_ITERATIONS * scaleFactor), CONFIG.ALGORITHM.MAX_ITERATIONS);
+    const studentCount = students.length;
+    const scaleFactor = studentCount > CONFIG.ALGORITHM.SCALE_THRESHOLD
+      ? Math.min(Math.pow(studentCount / CONFIG.ALGORITHM.SCALE_THRESHOLD, 1.5), 5)
+      : 1;
+    const numRuns = Math.min(Math.ceil(CONFIG.ALGORITHM.OPTIMIZATION_RUNS * scaleFactor), CONFIG.ALGORITHM.MAX_RUNS);
+    const iterations = Math.min(Math.ceil(CONFIG.ALGORITHM.ANNEALING_ITERATIONS * scaleFactor), CONFIG.ALGORITHM.MAX_ITERATIONS);
 
-      let bestAssignment = null, bestStats = null;
-      for (let run = 0; run < numRuns; run++) {
+    setProgress({ current: 0, total: numRuns });
+
+    // Process runs in batches to allow progress updates
+    const BATCH_SIZE = 3;
+    const allResults = [];
+
+    const processBatch = (startRun) => {
+      const endRun = Math.min(startRun + BATCH_SIZE, numRuns);
+      for (let run = startRun; run < endRun; run++) {
         const initial = generateInitialAssignment(run + 1);
-        const optimized = optimizeAssignment(initial, iterations);
+        let optimized = optimizeAssignment(initial, iterations);
+        optimized = greedyPolish(optimized);
         const runStats = calculateHappiness(optimized);
-        if (!bestAssignment || runStats.score > bestStats.score) {
-          bestAssignment = optimized;
-          bestStats = runStats;
-        }
+        const individualResults = analyzeStudentResults(optimized);
+        allResults.push({ assignments: optimized, stats: runStats, individualResults });
       }
 
-      setAssignments(bestAssignment);
-      const individualResults = analyzeStudentResults(bestAssignment);
-      setStats({
-        totalScore: bestStats.score, conflicts: bestStats.conflicts,
-        mutualFirstMatches: bestStats.mutualFirstMatches, mutualPreferences: bestStats.mutualPreferences,
-        preferencesMet: bestStats.preferencesMet, avgScore: bestStats.avgScore,
-        houseFirstChoices: bestStats.houseFirstChoices, houseSecondChoices: bestStats.houseSecondChoices,
-        validArrangements: numRuns, iterationsPerRun: iterations, individualResults
-      });
-      setIsGenerating(false);
-    }, 50);
-  }, [students, houses, generateInitialAssignment, optimizeAssignment, calculateHappiness, analyzeStudentResults]);
+      setProgress({ current: endRun, total: numRuns });
+
+      if (endRun < numRuns) {
+        setTimeout(() => processBatch(endRun), 0);
+      } else {
+        // All runs complete - select top distinct solutions
+        allResults.sort((a, b) => b.stats.score - a.stats.score);
+
+        const solutionsToKeep = CONFIG.ALGORITHM.SOLUTIONS_TO_GENERATE;
+        const kept = [];
+        for (const result of allResults) {
+          if (kept.length >= solutionsToKeep) break;
+          const isDuplicate = kept.some(k => areSolutionsSimilar(k.assignments, result.assignments));
+          if (!isDuplicate) {
+            kept.push({
+              id: kept.length,
+              label: `Solution ${kept.length + 1}`,
+              assignments: result.assignments,
+              stats: {
+                totalScore: result.stats.score,
+                conflicts: result.stats.conflicts,
+                mutualFirstMatches: result.stats.mutualFirstMatches,
+                mutualPreferences: result.stats.mutualPreferences,
+                preferencesMet: result.stats.preferencesMet,
+                avgScore: result.stats.avgScore,
+                houseFirstChoices: result.stats.houseFirstChoices,
+                houseSecondChoices: result.stats.houseSecondChoices,
+                validArrangements: numRuns,
+                iterationsPerRun: iterations,
+                individualResults: result.individualResults
+              }
+            });
+          }
+        }
+
+        setSolutions(kept);
+        setSelectedSolutionIndex(0);
+        setIsGenerating(false);
+      }
+    };
+
+    setTimeout(() => processBatch(0), 50);
+  }, [students, houses, generateInitialAssignment, optimizeAssignment, calculateHappiness, analyzeStudentResults, greedyPolish]);
 
   const resetAssignments = useCallback(() => {
-    setAssignments([]);
-    setStats(null);
+    setSolutions([]);
+    setSelectedSolutionIndex(0);
   }, []);
 
+  // Allow updating a solution's assignments (for manual tweaking)
+  const updateSolution = useCallback((solutionIndex, newAssignments) => {
+    setSolutions(prev => prev.map((sol, idx) => {
+      if (idx !== solutionIndex) return sol;
+      const newStats = calculateHappiness(newAssignments);
+      const newResults = analyzeStudentResults(newAssignments);
+      return {
+        ...sol,
+        assignments: newAssignments,
+        stats: {
+          ...sol.stats,
+          totalScore: newStats.score,
+          conflicts: newStats.conflicts,
+          mutualFirstMatches: newStats.mutualFirstMatches,
+          mutualPreferences: newStats.mutualPreferences,
+          preferencesMet: newStats.preferencesMet,
+          avgScore: newStats.avgScore,
+          houseFirstChoices: newStats.houseFirstChoices,
+          houseSecondChoices: newStats.houseSecondChoices,
+          individualResults: newResults
+        }
+      };
+    }));
+  }, [calculateHappiness, analyzeStudentResults]);
+
   return {
+    solutions,
+    selectedSolutionIndex,
+    setSelectedSolutionIndex,
     assignments,
     stats,
     isGenerating,
+    progress,
     runAssignment,
-    resetAssignments
+    resetAssignments,
+    calculateHappiness,
+    analyzeStudentResults,
+    updateSolution
   };
 }

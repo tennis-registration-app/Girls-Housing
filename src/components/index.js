@@ -4,3 +4,6 @@ export { PreferenceManager } from './PreferenceManager';
 export { ResultsView } from './ResultsView';
 export { DataManagement } from './DataManagement';
 export { TabNavigation } from './TabNavigation';
+export { BulkImportModal } from './BulkImportModal';
+export { SolutionComparer } from './SolutionComparer';
+export { ManualTweakView } from './ManualTweakView';

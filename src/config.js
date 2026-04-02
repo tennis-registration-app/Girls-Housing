@@ -19,18 +19,24 @@ export const CONFIG = {
 
   // Algorithm parameters
   ALGORITHM: {
-    OPTIMIZATION_RUNS: 8,            // Base number of random starting configurations
-    ANNEALING_ITERATIONS: 1000,      // Base steps per simulated annealing run
-    INITIAL_TEMPERATURE: 100,        // Starting temperature for annealing
-    COOLING_RATE: 0.997,             // Temperature decay rate per iteration (slower cooling)
+    OPTIMIZATION_RUNS: 10,           // Base number of random starting configurations
+    ANNEALING_ITERATIONS: 3000,      // Base steps per simulated annealing run
+    INITIAL_TEMPERATURE: 200,        // Starting temperature for annealing
+    COOLING_RATE: 0.998,             // Temperature decay rate per iteration (slower cooling)
     // Scaling: increase iterations for larger groups
     SCALE_THRESHOLD: 15,             // Start scaling above this many students
-    MAX_RUNS: 20,                    // Maximum optimization runs
-    MAX_ITERATIONS: 5000,            // Maximum annealing iterations
+    MAX_RUNS: 30,                    // Maximum optimization runs
+    MAX_ITERATIONS: 15000,           // Maximum annealing iterations
+    // Reheat to escape local optima
+    REHEAT_INTERVAL: 500,            // Reheat every N iterations
+    REHEAT_FACTOR: 0.3,              // Reheat to this fraction of best temperature
     // Operation probabilities during optimization
-    SWAP_PROBABILITY: 0.5,           // Probability of 2-way swap
-    CYCLE_PROBABILITY: 0.3,          // Probability of 3-way cycle swap
-    MOVE_PROBABILITY: 0.2,           // Probability of single student move
+    SWAP_PROBABILITY: 0.4,           // Probability of 2-way swap
+    CYCLE_PROBABILITY: 0.25,         // Probability of 3-way cycle swap
+    MOVE_PROBABILITY: 0.15,          // Probability of single student move
+    SMART_SWAP_PROBABILITY: 0.2,     // Probability of preference-aware swap
+    // Multi-solution
+    SOLUTIONS_TO_GENERATE: 5,        // Number of distinct solutions to keep
   },
 
   // UI defaults

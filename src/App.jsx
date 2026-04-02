@@ -34,11 +34,18 @@ function App() {
   const { getStudentName, hasMutualPreference } = useStudentHelpers(students);
 
   const {
+    solutions,
+    selectedSolutionIndex,
+    setSelectedSolutionIndex,
     assignments,
     stats,
     isGenerating,
+    progress,
     runAssignment,
-    resetAssignments
+    resetAssignments,
+    calculateHappiness,
+    analyzeStudentResults,
+    updateSolution
   } = useAssignmentAlgorithm(students, houses, getStudentName);
 
   // Reset UI state (used by project manager)
@@ -105,6 +112,18 @@ function App() {
     if (selectedStudentId === id) setSelectedStudentId(null);
   }, [setStudents, selectedStudentId]);
 
+  const bulkAddStudents = useCallback((namesList) => {
+    const newStudents = namesList.map((name, index) => ({
+      id: Date.now() + index,
+      firstName: name.firstName,
+      lastName: name.lastName,
+      preferences: [],
+      avoids: [],
+      housePreferences: []
+    }));
+    setStudents(prev => [...prev, ...newStudents]);
+  }, [setStudents]);
+
   // ============================================
   // RENDER
   // ============================================
@@ -119,7 +138,15 @@ function App() {
           <p className="text-gray-600 mt-2">Optimize housing assignments based on student preferences</p>
         </div>
 
-        <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />
+        <TabNavigation
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          badges={{
+            students: students.length || null,
+            houses: houses.length || null,
+            results: solutions.length || null,
+          }}
+        />
 
         <div className="p-6">
           {activeTab === 'houses' && (
@@ -134,9 +161,11 @@ function App() {
           {activeTab === 'students' && (
             <StudentList
               students={students}
+              houses={houses}
               onAddStudent={addStudent}
               onUpdateStudent={updateStudent}
               onRemoveStudent={removeStudent}
+              onBulkImport={bulkAddStudents}
             />
           )}
 
@@ -155,12 +184,20 @@ function App() {
           {activeTab === 'results' && (
             <ResultsView
               students={students}
+              houses={houses}
+              solutions={solutions}
+              selectedSolutionIndex={selectedSolutionIndex}
+              onSelectSolution={setSelectedSolutionIndex}
               assignments={assignments}
               stats={stats}
               isGenerating={isGenerating}
+              progress={progress}
               onRunAssignment={runAssignment}
               onReset={resetAssignments}
               getStudentName={getStudentName}
+              calculateHappiness={calculateHappiness}
+              analyzeStudentResults={analyzeStudentResults}
+              onUpdateSolution={updateSolution}
             />
           )}
 
